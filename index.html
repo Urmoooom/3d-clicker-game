@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Clicker Game</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div id="ui">
+        <div id="stats-panel">
+            <div class="stat-item">
+                <span class="stat-label">Clicks:</span>
+                <span class="stat-value" id="clicks">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Coins:</span>
+                <span class="stat-value" id="coins">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Collected:</span>
+                <span class="stat-value" id="collected">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Rebirth Level:</span>
+                <span class="stat-value" id="rebirth-level">0</span>
+            </div>
+        </div>
+
+        <div id="info-panel">
+            <p id="location">Location: Crystal Area</p>
+            <p id="help-text">WASD: Move | Space: Jump | Click Crystal | Press S for Shop | Press I for Incremental</p>
+        </div>
+
+        <div id="shop-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Shop</h2>
+                    <span class="close" onclick="closeShop()">&times;</span>
+                </div>
+                <div id="shop-items" class="shop-grid"></div>
+            </div>
+        </div>
+
+        <div id="incremental-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Incremental Area</h2>
+                    <span class="close" onclick="closeIncremental()">&times;</span>
+                </div>
+                <div id="incremental-content">
+                    <div id="incremental-stats" class="incremental-stats"></div>
+                    <div id="incremental-items" class="incremental-grid"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="rebirth-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Rebirth</h2>
+                    <span class="close" onclick="closeRebirth()">&times;</span>
+                </div>
+                <div id="rebirth-content">
+                    <p>You will reset all progress but gain <span id="rebirth-gain">0</span> Rebirth Points!</p>
+                    <button onclick="confirmRebirth()">Confirm Rebirth</button>
+                    <button onclick="closeRebirth()">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
