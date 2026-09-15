@@ -8,6 +8,12 @@ const GAME_STATES = {
     INCREMENTAL: 'incremental'
 };
 
+const LOCATIONS = {
+    CRYSTAL_AREA: { x: 0, z: -30, name: 'Crystal Area' },
+    SHOP: { x: -60, z: 0, name: 'Shop' },
+    INCREMENTAL: { x: 60, z: 0, name: 'Incremental Farm' }
+};
+
 let gameState = {
     clicks: 0,
     coins: 0,
@@ -48,6 +54,10 @@ let crystal, player, objects = [];
 let keys = {};
 let lastClickTime = 0;
 
+// Camera control
+let mouse = { x: 0, y: 0, locked: false };
+let camera_euler = { x: 0, y: 0 };
+
 // Initialize game
 function init() {
     // Three.js scene setup
@@ -57,7 +67,6 @@ function init() {
     
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
     camera.position.set(0, 2, 10);
-    camera.lookAt(0, 2, 0);
     
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -65,440 +74,16 @@ function init() {
     document.getElementById('canvas-container').appendChild(renderer.domElement);
     
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
     
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(100, 100, 100);
+    directionalLight.position.set(100, 150, 100);
     directionalLight.castShadow = true;
     directionalLight.shadow.mapSize.width = 2048;
     directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.camera.far = 500;
     scene.add(directionalLight);
     
     // Ground
-    const groundGeometry = new THREE.PlaneGeometry(200, 200);
-    const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x1a1a00 });
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
-    
-    // Crystal (clickable)
-    createCrystal();
-    
-    // Player (camera follow)
-    player = { position: camera.position.clone(), velocity: new THREE.Vector3() };
-    
-    // Load game state
-    loadGameState();
-    updateUI();
-    
-    // Event listeners
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    renderer.domElement.addEventListener('click', handleCanvasClick);
-    window.addEventListener('resize', handleWindowResize);
-    
-    // Game loop
-    animate();
-}
-
-function createCrystal() {
-    const geometry = new THREE.OctahedronGeometry(2, 2);
-    const material = new THREE.MeshPhongMaterial({
-        color: 0x00ff00,
-        emissive: 0x00aa00,
-        shininess: 100
-    });
-    crystal = new THREE.Mesh(geometry, material);
-    crystal.position.set(0, 3, -5);
-    crystal.castShadow = true;
-    crystal.receiveShadow = true;
-    scene.add(crystal);
-}
-
-function handleKeyDown(e) {
-    keys[e.key.toLowerCase()] = true;
-    
-    if (e.key === 's' || e.key === 'S') {
-        if (gameState.currentLocation === GAME_STATES.CRYSTAL_AREA) {
-            openShop();
-        }
-    }
-    if (e.key === 'i' || e.key === 'I') {
-        if (gameState.currentLocation === GAME_STATES.CRYSTAL_AREA) {
-            openIncremental();
-        }
-    }
-    if (e.key === 'r' || e.key === 'R') {
-        if (gameState.currentLocation === GAME_STATES.CRYSTAL_AREA && gameState.coins >= 50000) {
-            openRebirth();
-        }
-    }
-}
-
-function handleKeyUp(e) {
-    keys[e.key.toLowerCase()] = false;
-}
-
-function handleCanvasClick(e) {
-    if (gameState.currentLocation !== GAME_STATES.CRYSTAL_AREA) return;
-    
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    
-    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-    
-    raycaster.setFromCamera(mouse, camera);
-    
-    const intersects = raycaster.intersectObjects([crystal]);
-    
-    if (intersects.length > 0) {
-        clickCrystal(e.clientX, e.clientY);
-    }
-}
-
-function clickCrystal(x, y) {
-    let damage = gameState.clickPower * gameState.clickMultiplier;
-    
-    // Random crit based on upgrades
-    if (gameState.upgrades.critStrike.owned > 0) {
-        if (Math.random() < gameState.upgrades.critStrike.owned * 0.05) {
-            damage *= 2;
-        }
-    }
-    
-    gameState.clicks += Math.floor(damage);
-    gameState.coins += Math.floor(damage) * 0.5;
-    
-    // Crystal animation
-    crystal.scale.set(1.2, 1.2, 1.2);
-    setTimeout(() => {
-        crystal.scale.set(1, 1, 1);
-    }, 100);
-    
-    // Floating damage text
-    showFloatingText('+' + Math.floor(damage), x, y, '#ffff00');
-    
-    // Update UI
-    document.getElementById('clicks').textContent = formatNumber(gameState.clicks);
-    document.getElementById('coins').textContent = formatNumber(gameState.coins);
-}
-
-function showFloatingText(text, x, y, color) {
-    const div = document.createElement('div');
-    div.className = 'click-damage';
-    div.textContent = text;
-    div.style.left = x + 'px';
-    div.style.top = y + 'px';
-    div.style.color = color;
-    document.body.appendChild(div);
-    
-    setTimeout(() => div.remove(), 1000);
-}
-
-function updatePlayerMovement() {
-    const speed = 0.2;
-    const direction = new THREE.Vector3();
-    
-    if (keys['w']) direction.z -= 1;
-    if (keys['s']) direction.z += 1;
-    if (keys['a']) direction.x -= 1;
-    if (keys['d']) direction.x += 1;
-    
-    if (direction.length() > 0) {
-        direction.normalize();
-        camera.position.addScaledVector(direction, speed);
-    }
-    
-    // Jump (space)
-    if (keys[' '] && Math.abs(player.velocity.y) < 0.01) {
-        player.velocity.y = 0.5;
-    }
-    
-    // Gravity
-    player.velocity.y -= 0.015;
-    camera.position.y += player.velocity.y;
-    
-    // Ground collision
-    if (camera.position.y < 1.5) {
-        camera.position.y = 1.5;
-        player.velocity.y = 0;
-    }
-    
-    // Camera look at crystal
-    camera.lookAt(0, 2, -5);
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-    
-    if (gameState.currentLocation === GAME_STATES.CRYSTAL_AREA) {
-        updatePlayerMovement();
-        
-        // Rotate crystal
-        crystal.rotation.x += 0.005;
-        crystal.rotation.y += 0.01;
-        crystal.rotation.z += 0.003;
-        
-        // Auto-clicker
-        gameState.autoClickerIncome = gameState.upgrades.autoClicker.owned * 0.1;
-        if (gameState.autoClickerIncome > 0) {
-            gameState.coins += gameState.autoClickerIncome / 60; // Per frame (60fps)
-            document.getElementById('coins').textContent = formatNumber(gameState.coins);
-        }
-    }
-    
-    // Incremental income
-    gameState.incrementalIncome = Object.keys(gameState.spawners).reduce((sum, key) => {
-        return sum + gameState.spawners[key].owned * gameState.spawners[key].income;
-    }, 0);
-    
-    if (gameState.incrementalIncome > 0) {
-        gameState.coins += gameState.incrementalIncome / 60;
-        gameState.collected += gameState.incrementalIncome / 60;
-        document.getElementById('coins').textContent = formatNumber(gameState.coins);
-        document.getElementById('collected').textContent = formatNumber(gameState.collected);
-    }
-    
-    // Apply rebirth multiplier
-    const rebirthMultiplier = 1 + gameState.rebirthLevel * 0.1;
-    gameState.clickMultiplier = 1 + (gameState.upgrades.doubleClick.owned * 0.5 + gameState.upgrades.tripleClick.owned * 1.5) * rebirthMultiplier;
-    gameState.clickPower = 1 + gameState.rebirthLevel * 0.5;
-    
-    renderer.render(scene, camera);
-}
-
-function handleWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-// UI Functions
-function updateUI() {
-    document.getElementById('clicks').textContent = formatNumber(gameState.clicks);
-    document.getElementById('coins').textContent = formatNumber(gameState.coins);
-    document.getElementById('collected').textContent = formatNumber(gameState.collected);
-    document.getElementById('rebirth-level').textContent = gameState.rebirthLevel;
-}
-
-function formatNumber(num) {
-    if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
-    if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
-    if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
-    return Math.floor(num).toString();
-}
-
-function openShop() {
-    const modal = document.getElementById('shop-modal');
-    const shopItems = document.getElementById('shop-items');
-    shopItems.innerHTML = '';
-    
-    // Upgrades
-    const upgradesSection = document.createElement('h3');
-    upgradesSection.textContent = 'UPGRADES';
-    upgradesSection.style.color = '#00ff00';
-    upgradesSection.style.gridColumn = '1 / -1';
-    shopItems.appendChild(upgradesSection);
-    
-    Object.keys(gameState.upgrades).forEach(key => {
-        const upgrade = gameState.upgrades[key];
-        const costMultiplier = Math.pow(1.15, upgrade.owned);
-        const actualCost = upgrade.cost * costMultiplier;
-        
-        const item = document.createElement('div');
-        item.className = 'shop-item';
-        if (gameState.coins < actualCost) item.classList.add('unavailable');
-        
-        item.innerHTML = `
-            <h3>${formatUpgradeName(key)}</h3>
-            <p class="owned">Owned: ${upgrade.owned}</p>
-            <p>${formatUpgradeDescription(key)}</p>
-            <div class="price">Cost: ${formatNumber(actualCost)} coins</div>
-        `;
-        
-        if (gameState.coins >= actualCost) {
-            item.onclick = () => buyUpgrade(key);
-        }
-        
-        shopItems.appendChild(item);
-    });
-    
-    // Rebirth button
-    if (gameState.coins >= 50000) {
-        const rebirthBtn = document.createElement('div');
-        rebirthBtn.className = 'shop-item';
-        rebirthBtn.style.cursor = 'pointer';
-        rebirthBtn.innerHTML = `
-            <h3>Rebirth (R)</h3>
-            <p>Reset progress for rebirth points</p>
-            <div class="price">Cost: 50,000 coins</div>
-        `;
-        rebirthBtn.onclick = openRebirth;
-        shopItems.appendChild(rebirthBtn);
-    }
-    
-    modal.classList.add('active');
-}
-
-function formatUpgradeName(key) {
-    return key.replace(/([A-Z])/g, ' $1').toUpperCase().trim();
-}
-
-function formatUpgradeDescription(key) {
-    const descriptions = {
-        doubleClick: '+50% click power',
-        tripleClick: '+100% click power',
-        autoClicker: '+0.1 clicks/sec passive',
-        critStrike: '5% crit chance per level (2x damage)'
-    };
-    return descriptions[key] || '';
-}
-
-function buyUpgrade(key) {
-    const upgrade = gameState.upgrades[key];
-    const costMultiplier = Math.pow(1.15, upgrade.owned);
-    const actualCost = upgrade.cost * costMultiplier;
-    
-    if (gameState.coins >= actualCost) {
-        gameState.coins -= actualCost;
-        upgrade.owned++;
-        
-        document.getElementById('coins').textContent = formatNumber(gameState.coins);
-        saveGameState();
-        openShop(); // Refresh shop
-    }
-}
-
-function closeShop() {
-    document.getElementById('shop-modal').classList.remove('active');
-}
-
-function openIncremental() {
-    const modal = document.getElementById('incremental-modal');
-    const content = document.getElementById('incremental-items');
-    const stats = document.getElementById('incremental-stats');
-    
-    content.innerHTML = '';
-    stats.innerHTML = `
-        <div>Total Income: ${formatNumber(gameState.incrementalIncome)} coins/sec</div>
-        <div>Total Collected: ${formatNumber(gameState.collected)}</div>
-        <div>Rebirth Multiplier: ${(1 + gameState.rebirthLevel * 0.1).toFixed(2)}x</div>
-    `;
-    
-    Object.keys(gameState.spawners).forEach(key => {
-        const spawner = gameState.spawners[key];
-        const costMultiplier = Math.pow(1.2, spawner.owned);
-        const actualCost = spawner.cost * costMultiplier;
-        
-        const item = document.createElement('div');
-        item.className = 'incremental-item';
-        if (gameState.coins < actualCost) item.classList.add('unavailable');
-        
-        item.innerHTML = `
-            <h3>${formatSpawnerName(key)}</h3>
-            <p>Owned: ${spawner.owned}</p>
-            <p>Income: ${formatNumber(spawner.income)} coins/sec</p>
-            <div class="price">Cost: ${formatNumber(actualCost)}</div>
-        `;
-        
-        if (gameState.coins >= actualCost) {
-            item.onclick = () => buySpawner(key);
-        }
-        
-        content.appendChild(item);
-    });
-    
-    modal.classList.add('active');
-}
-
-function formatSpawnerName(key) {
-    const names = {
-        basic: 'Basic Spawner',
-        advanced: 'Advanced Spawner',
-        premium: 'Premium Spawner',
-        legendary: 'Legendary Spawner'
-    };
-    return names[key] || key;
-}
-
-function buySpawner(key) {
-    const spawner = gameState.spawners[key];
-    const costMultiplier = Math.pow(1.2, spawner.owned);
-    const actualCost = spawner.cost * costMultiplier;
-    
-    if (gameState.coins >= actualCost) {
-        gameState.coins -= actualCost;
-        spawner.owned++;
-        
-        document.getElementById('coins').textContent = formatNumber(gameState.coins);
-        saveGameState();
-        openIncremental(); // Refresh
-    }
-}
-
-function closeIncremental() {
-    document.getElementById('incremental-modal').classList.remove('active');
-}
-
-function openRebirth() {
-    if (gameState.coins < 50000) return;
-    
-    const rebirthGain = Math.floor(Math.sqrt(gameState.coins / 1000));
-    document.getElementById('rebirth-gain').textContent = rebirthGain;
-    document.getElementById('rebirth-modal').classList.add('active');
-}
-
-function confirmRebirth() {
-    const rebirthGain = Math.floor(Math.sqrt(gameState.coins / 1000));
-    
-    // Reset game
-    gameState.clicks = 0;
-    gameState.coins = 0;
-    gameState.collected = 0;
-    gameState.clickMultiplier = 1;
-    gameState.clickPower = 1;
-    gameState.upgrades = {
-        doubleClick: { owned: 0, cost: 50 },
-        tripleClick: { owned: 0, cost: 200 },
-        autoClicker: { owned: 0, cost: 500 },
-        critStrike: { owned: 0, cost: 1000 }
-    };
-    gameState.spawners = {
-        basic: { owned: 0, cost: 100, income: 1 },
-        advanced: { owned: 0, cost: 500, income: 10 },
-        premium: { owned: 0, cost: 2000, income: 50 },
-        legendary: { owned: 0, cost: 10000, income: 500 }
-    };
-    
-    // Rebirth bonuses
-    gameState.rebirthLevel++;
-    gameState.rebirthPoints += rebirthGain;
-    gameState.coins = 1000; // Starting coins
-    
-    closeRebirth();
-    updateUI();
-    saveGameState();
-}
-
-function closeRebirth() {
-    document.getElementById('rebirth-modal').classList.remove('active');
-}
-
-// Save/Load
-function saveGameState() {
-    localStorage.setItem('gameState', JSON.stringify(gameState));
-}
-
-function loadGameState() {
-    const saved = localStorage.getItem('gameState');
-    if (saved) {
-        const loaded = JSON.parse(saved);
-        Object.assign(gameState, loaded);
-    }
-}
-
-// Start game
-window.addEventListener('load', init);
+    const groundGeometry = new THREE.PlaneGeometry(500, 500);\n    const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x1a3a1a });\n    const ground = new THREE.Mesh(groundGeometry, groundMaterial);\n    ground.rotation.x = -Math.PI / 2;\n    ground.receiveShadow = true;\n    scene.add(ground);\n    \n    // Create world\n    createCrystal();\n    createShop();\n    createIncrementalArea();\n    createWalls();\n    \n    // Player (camera)\n    player = { \n        position: camera.position.clone(), \n        velocity: new THREE.Vector3(),\n        onGround: false\n    };\n    \n    // Load game state\n    loadGameState();\n    updateUI();\n    \n    // Request pointer lock\n    document.addEventListener('click', () => {\n        renderer.domElement.requestPointerLock = renderer.domElement.requestPointerLock || renderer.domElement.mozRequestPointerLock;\n        renderer.domElement.requestPointerLock();\n    });\n    \n    // Event listeners\n    document.addEventListener('pointerlockchange', onPointerLockChange);\n    document.addEventListener('mozpointerlockchange', onPointerLockChange);\n    window.addEventListener('keydown', handleKeyDown);\n    window.addEventListener('keyup', handleKeyUp);\n    document.addEventListener('mousemove', handleMouseMove);\n    renderer.domElement.addEventListener('click', handleCanvasClick);\n    window.addEventListener('resize', handleWindowResize);\n    \n    // Game loop\n    animate();\n}\n\nfunction onPointerLockChange() {\n    if (document.pointerLockElement === renderer.domElement || document.mozPointerLockElement === renderer.domElement) {\n        mouse.locked = true;\n    } else {\n        mouse.locked = false;\n    }\n}\n\nfunction createCrystal() {\n    const geometry = new THREE.OctahedronGeometry(2, 2);\n    const material = new THREE.MeshPhongMaterial({\n        color: 0x00ff00,\n        emissive: 0x00aa00,\n        shininess: 100\n    });\n    crystal = new THREE.Mesh(geometry, material);\n    crystal.position.set(LOCATIONS.CRYSTAL_AREA.x, 3, LOCATIONS.CRYSTAL_AREA.z);\n    crystal.castShadow = true;\n    crystal.receiveShadow = true;\n    crystal.userData = { type: 'crystal' };\n    scene.add(crystal);\n    objects.push(crystal);\n}\n\nfunction createShop() {\n    // Shop building\n    const shopGeometry = new THREE.BoxGeometry(20, 15, 20);\n    const shopMaterial = new THREE.MeshPhongMaterial({ color: 0x333366 });\n    const shop = new THREE.Mesh(shopGeometry, shopMaterial);\n    shop.position.set(LOCATIONS.SHOP.x, 8, LOCATIONS.SHOP.z);\n    shop.castShadow = true;\n    shop.receiveShadow = true;\n    scene.add(shop);\n    \n    // Shop door\n    const doorGeometry = new THREE.BoxGeometry(4, 6, 0.5);\n    const doorMaterial = new THREE.MeshPhongMaterial({ color: 0xffaa00 });\n    const door = new THREE.Mesh(doorGeometry, doorMaterial);\n    door.position.set(LOCATIONS.SHOP.x, 5, LOCATIONS.SHOP.z - 10.5);\n    door.castShadow = true;\n    door.receiveShadow = true;\n    door.userData = { type: 'shopDoor', clickable: true };\n    scene.add(door);\n    objects.push(door);\n    \n    // Shop roof\n    const roofGeometry = new THREE.ConeGeometry(15, 6, 4);\n    const roofMaterial = new THREE.MeshPhongMaterial({ color: 0xff6600 });\n    const roof = new THREE.Mesh(roofGeometry, roofMaterial);\n    roof.position.set(LOCATIONS.SHOP.x, 19, LOCATIONS.SHOP.z);\n    roof.castShadow = true;\n    roof.receiveShadow = true;\n    scene.add(roof);\n    \n    // Shop sign\n    const signGeometry = new THREE.BoxGeometry(8, 4, 0.5);\n    const signMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff00, emissive: 0x00aa00 });\n    const sign = new THREE.Mesh(signGeometry, signMaterial);\n    sign.position.set(LOCATIONS.SHOP.x + 12, 12, LOCATIONS.SHOP.z);\n    sign.castShadow = true;\n    scene.add(sign);\n}\n\nfunction createIncrementalArea() {\n    // Platform\n    const platformGeometry = new THREE.BoxGeometry(40, 1, 40);\n    const platformMaterial = new THREE.MeshPhongMaterial({ color: 0x1a4d1a });\n    const platform = new THREE.Mesh(platformGeometry, platformMaterial);\n    platform.position.set(LOCATIONS.INCREMENTAL.x, 0.5, LOCATIONS.INCREMENTAL.z);\n    platform.castShadow = true;\n    platform.receiveShadow = true;\n    scene.add(platform);\n    \n    // Spawner pillars (visual indicators)\n    for (let i = 0; i < 4; i++) {\n        const angle = (i / 4) * Math.PI * 2;\n        const radius = 12;\n        const x = LOCATIONS.INCREMENTAL.x + Math.cos(angle) * radius;\n        const z = LOCATIONS.INCREMENTAL.z + Math.sin(angle) * radius;\n        \n        const pillarGeometry = new THREE.CylinderGeometry(2, 2, 6, 8);\n        const pillarMaterial = new THREE.MeshPhongMaterial({ color: 0x6600cc });\n        const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);\n        pillar.position.set(x, 3, z);\n        pillar.castShadow = true;\n        pillar.receiveShadow = true;\n        pillar.userData = { type: 'spawnerPillar', index: i };\n        scene.add(pillar);\n        objects.push(pillar);\n    }\n    \n    // Center collection point\n    const centerGeometry = new THREE.SphereGeometry(3, 16, 16);\n    const centerMaterial = new THREE.MeshPhongMaterial({ color: 0x00aaff, emissive: 0x0055ff });\n    const center = new THREE.Mesh(centerGeometry, centerMaterial);\n    center.position.set(LOCATIONS.INCREMENTAL.x, 3, LOCATIONS.INCREMENTAL.z);\n    center.castShadow = true;\n    center.receiveShadow = true;\n    center.userData = { type: 'collectionPoint' };\n    scene.add(center);\n    objects.push(center);\n}\n\nfunction createWalls() {\n    // Boundary walls to keep player in world\n    const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x330033 });\n    \n    // Left wall\n    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(1, 50, 200), wallMaterial);\n    leftWall.position.set(-120, 25, 0);\n    leftWall.castShadow = true;\n    scene.add(leftWall);\n    \n    // Right wall\n    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(1, 50, 200), wallMaterial);\n    rightWall.position.set(120, 25, 0);\n    rightWall.castShadow = true;\n    scene.add(rightWall);\n    \n    // Front wall\n    const frontWall = new THREE.Mesh(new THREE.BoxGeometry(200, 50, 1), wallMaterial);\n    frontWall.position.set(0, 25, -120);\n    frontWall.castShadow = true;\n    scene.add(frontWall);\n    \n    // Back wall\n    const backWall = new THREE.Mesh(new THREE.BoxGeometry(200, 50, 1), wallMaterial);\n    backWall.position.set(0, 25, 120);\n    backWall.castShadow = true;\n    scene.add(backWall);\n}\n\nfunction handleKeyDown(e) {\n    keys[e.key.toLowerCase()] = true;\n}\n\nfunction handleKeyUp(e) {\n    keys[e.key.toLowerCase()] = false;\n}\n\nfunction handleMouseMove(e) {\n    if (!mouse.locked) return;\n    \n    const movementX = e.movementX || e.mozMovementX || 0;\n    const movementY = e.movementY || e.mozMovementY || 0;\n    \n    camera_euler.y -= movementX * 0.002;\n    camera_euler.x -= movementY * 0.002;\n    \n    // Clamp vertical look\n    camera_euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera_euler.x));\n}\n\nfunction handleCanvasClick(e) {\n    const raycaster = new THREE.Raycaster();\n    const mouse_vec = new THREE.Vector2();\n    \n    mouse_vec.x = (e.clientX / window.innerWidth) * 2 - 1;\n    mouse_vec.y = -(e.clientY / window.innerHeight) * 2 + 1;\n    \n    raycaster.setFromCamera(mouse_vec, camera);\n    \n    const intersects = raycaster.intersectObjects(objects);\n    \n    if (intersects.length > 0) {\n        const obj = intersects[0].object;\n        \n        if (obj.userData.type === 'crystal') {\n            clickCrystal(e.clientX, e.clientY);\n        } else if (obj.userData.type === 'shopDoor') {\n            enterShop();\n        } else if (obj.userData.type === 'collectionPoint') {\n            collectItems();\n        } else if (obj.userData.type === 'spawnerPillar') {\n            enterIncrementalMenu();\n        }\n    }\n}\n\nfunction clickCrystal(x, y) {\n    let damage = gameState.clickPower * gameState.clickMultiplier;\n    \n    if (gameState.upgrades.critStrike.owned > 0) {\n        if (Math.random() < gameState.upgrades.critStrike.owned * 0.05) {\n            damage *= 2;\n        }\n    }\n    \n    gameState.clicks += Math.floor(damage);\n    gameState.coins += Math.floor(damage) * 0.5;\n    \n    crystal.scale.set(1.2, 1.2, 1.2);\n    setTimeout(() => {\n        crystal.scale.set(1, 1, 1);\n    }, 100);\n    \n    showFloatingText('+' + Math.floor(damage), x, y, '#ffff00');\n    \n    document.getElementById('clicks').textContent = formatNumber(gameState.clicks);\n    document.getElementById('coins').textContent = formatNumber(gameState.coins);\n    saveGameState();\n}\n\nfunction enterShop() {\n    gameState.currentLocation = GAME_STATES.SHOP;\n    document.getElementById('location').textContent = 'Location: Shop';\n    document.getElementById('help-text').textContent = 'Click items to buy upgrades | ESC to leave';\n    \n    const modal = document.getElementById('shop-modal');\n    const shopItems = document.getElementById('shop-items');\n    shopItems.innerHTML = '';\n    \n    const upgradesSection = document.createElement('h3');\n    upgradesSection.textContent = 'UPGRADES';\n    upgradesSection.style.color = '#00ff00';\n    upgradesSection.style.gridColumn = '1 / -1';\n    shopItems.appendChild(upgradesSection);\n    \n    Object.keys(gameState.upgrades).forEach(key => {\n        const upgrade = gameState.upgrades[key];\n        const costMultiplier = Math.pow(1.15, upgrade.owned);\n        const actualCost = upgrade.cost * costMultiplier;\n        \n        const item = document.createElement('div');\n        item.className = 'shop-item';\n        if (gameState.coins < actualCost) item.classList.add('unavailable');\n        \n        item.innerHTML = `\n            <h3>${formatUpgradeName(key)}</h3>\n            <p class=\"owned\">Owned: ${upgrade.owned}</p>\n            <p>${formatUpgradeDescription(key)}</p>\n            <div class=\"price\">Cost: ${formatNumber(actualCost)} coins</div>\n        `;\n        \n        if (gameState.coins >= actualCost) {\n            item.onclick = () => buyUpgrade(key);\n        }\n        \n        shopItems.appendChild(item);\n    });\n    \n    if (gameState.coins >= 50000) {\n        const rebirthBtn = document.createElement('div');\n        rebirthBtn.className = 'shop-item';\n        rebirthBtn.style.cursor = 'pointer';\n        rebirthBtn.innerHTML = `\n            <h3>Rebirth</h3>\n            <p>Reset progress for rebirth points</p>\n            <div class=\"price\">Cost: 50,000 coins</div>\n        `;\n        rebirthBtn.onclick = openRebirth;\n        shopItems.appendChild(rebirthBtn);\n    }\n    \n    modal.classList.add('active');\n}\n\nfunction leaveShop() {\n    gameState.currentLocation = GAME_STATES.CRYSTAL_AREA;\n    document.getElementById('location').textContent = 'Location: Crystal Area';\n    document.getElementById('help-text').textContent = 'WASD: Move | Mouse: Look | Click: Interact | Click door to enter shop';\n    document.getElementById('shop-modal').classList.remove('active');\n}\n\nfunction enterIncrementalMenu() {\n    gameState.currentLocation = GAME_STATES.INCREMENTAL;\n    document.getElementById('location').textContent = 'Location: Incremental Farm';\n    document.getElementById('help-text').textContent = 'Click items to buy spawners | ESC to leave';\n    \n    const modal = document.getElementById('incremental-modal');\n    const content = document.getElementById('incremental-items');\n    const stats = document.getElementById('incremental-stats');\n    \n    content.innerHTML = '';\n    stats.innerHTML = `\n        <div>Total Income: ${formatNumber(gameState.incrementalIncome)} coins/sec</div>\n        <div>Total Collected: ${formatNumber(gameState.collected)}</div>\n        <div>Rebirth Multiplier: ${(1 + gameState.rebirthLevel * 0.1).toFixed(2)}x</div>\n    `;\n    \n    Object.keys(gameState.spawners).forEach(key => {\n        const spawner = gameState.spawners[key];\n        const costMultiplier = Math.pow(1.2, spawner.owned);\n        const actualCost = spawner.cost * costMultiplier;\n        \n        const item = document.createElement('div');\n        item.className = 'incremental-item';\n        if (gameState.coins < actualCost) item.classList.add('unavailable');\n        \n        item.innerHTML = `\n            <h3>${formatSpawnerName(key)}</h3>\n            <p>Owned: ${spawner.owned}</p>\n            <p>Income: ${formatNumber(spawner.income)} coins/sec</p>\n            <div class=\"price\">Cost: ${formatNumber(actualCost)}</div>\n        `;\n        \n        if (gameState.coins >= actualCost) {\n            item.onclick = () => buySpawner(key);\n        }\n        \n        content.appendChild(item);\n    });\n    \n    modal.classList.add('active');\n}\n\nfunction leaveIncremental() {\n    gameState.currentLocation = GAME_STATES.CRYSTAL_AREA;\n    document.getElementById('location').textContent = 'Location: Crystal Area';\n    document.getElementById('help-text').textContent = 'WASD: Move | Mouse: Look | Click: Interact | Click pillar to buy spawners';\n    document.getElementById('incremental-modal').classList.remove('active');\n}\n\nfunction collectItems() {\n    // Particle effect or collection animation\n    gameState.coins += gameState.incrementalIncome * 5;\n    document.getElementById('coins').textContent = formatNumber(gameState.coins);\n    saveGameState();\n}\n\nfunction showFloatingText(text, x, y, color) {\n    const div = document.createElement('div');\n    div.className = 'click-damage';\n    div.textContent = text;\n    div.style.left = x + 'px';\n    div.style.top = y + 'px';\n    div.style.color = color;\n    document.body.appendChild(div);\n    \n    setTimeout(() => div.remove(), 1000);\n}\n\nfunction updatePlayerMovement() {\n    const speed = 0.15;\n    const direction = new THREE.Vector3();\n    \n    if (keys['w']) direction.z -= 1;\n    if (keys['s']) direction.z += 1;\n    if (keys['a']) direction.x -= 1;\n    if (keys['d']) direction.x += 1;\n    \n    if (direction.length() > 0) {\n        direction.normalize();\n        direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), camera_euler.y);\n        camera.position.addScaledVector(direction, speed);\n    }\n    \n    // Jump (space)\n    if (keys[' '] && player.onGround) {\n        player.velocity.y = 0.3;\n        player.onGround = false;\n    }\n    \n    // Gravity\n    player.velocity.y -= 0.02;\n    camera.position.y += player.velocity.y;\n    \n    // Ground collision\n    if (camera.position.y < 1.7) {\n        camera.position.y = 1.7;\n        player.velocity.y = 0;\n        player.onGround = true;\n    }\n    \n    // Boundary collision\n    camera.position.x = Math.max(-115, Math.min(115, camera.position.x));\n    camera.position.z = Math.max(-115, Math.min(115, camera.position.z));\n}\n\nfunction updateCameraRotation() {\n    const forward = new THREE.Vector3(0, 0, -1);\n    const up = new THREE.Vector3(0, 1, 0);\n    \n    forward.applyAxisAngle(up, camera_euler.y);\n    \n    const right = new THREE.Vector3().crossVectors(forward, up).normalize();\n    \n    const newForward = new THREE.Vector3();\n    newForward.copy(forward);\n    newForward.applyAxisAngle(right, camera_euler.x);\n    \n    camera.lookAt(camera.position.clone().add(newForward));\n}\n\nfunction animate() {\n    requestAnimationFrame(animate);\n    \n    if (gameState.currentLocation === GAME_STATES.CRYSTAL_AREA) {\n        updatePlayerMovement();\n        updateCameraRotation();\n        \n        // Rotate crystal\n        crystal.rotation.x += 0.005;\n        crystal.rotation.y += 0.01;\n        crystal.rotation.z += 0.003;\n        \n        // Auto-clicker\n        gameState.autoClickerIncome = gameState.upgrades.autoClicker.owned * 0.1;\n        if (gameState.autoClickerIncome > 0) {\n            gameState.coins += gameState.autoClickerIncome / 60;\n            document.getElementById('coins').textContent = formatNumber(gameState.coins);\n        }\n    } else {\n        updateCameraRotation();\n    }\n    \n    // Incremental income\n    gameState.incrementalIncome = Object.keys(gameState.spawners).reduce((sum, key) => {\n        return sum + gameState.spawners[key].owned * gameState.spawners[key].income;\n    }, 0);\n    \n    if (gameState.incrementalIncome > 0) {\n        gameState.coins += gameState.incrementalIncome / 60;\n        gameState.collected += gameState.incrementalIncome / 60;\n        document.getElementById('coins').textContent = formatNumber(gameState.coins);\n        document.getElementById('collected').textContent = formatNumber(gameState.collected);\n    }\n    \n    const rebirthMultiplier = 1 + gameState.rebirthLevel * 0.1;\n    gameState.clickMultiplier = 1 + (gameState.upgrades.doubleClick.owned * 0.5 + gameState.upgrades.tripleClick.owned * 1.5) * rebirthMultiplier;\n    gameState.clickPower = 1 + gameState.rebirthLevel * 0.5;\n    \n    renderer.render(scene, camera);\n}\n\nfunction handleWindowResize() {\n    camera.aspect = window.innerWidth / window.innerHeight;\n    camera.updateProjectionMatrix();\n    renderer.setSize(window.innerWidth, window.innerHeight);\n}\n\n// UI Functions\nfunction updateUI() {\n    document.getElementById('clicks').textContent = formatNumber(gameState.clicks);\n    document.getElementById('coins').textContent = formatNumber(gameState.coins);\n    document.getElementById('collected').textContent = formatNumber(gameState.collected);\n    document.getElementById('rebirth-level').textContent = gameState.rebirthLevel;\n}\n\nfunction formatNumber(num) {\n    if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';\n    if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';\n    if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';\n    return Math.floor(num).toString();\n}\n\nfunction formatUpgradeName(key) {\n    return key.replace(/([A-Z])/g, ' $1').toUpperCase().trim();\n}\n\nfunction formatUpgradeDescription(key) {\n    const descriptions = {\n        doubleClick: '+50% click power',\n        tripleClick: '+100% click power',\n        autoClicker: '+0.1 clicks/sec passive',\n        critStrike: '5% crit chance per level (2x damage)'\n    };\n    return descriptions[key] || '';\n}\n\nfunction buyUpgrade(key) {\n    const upgrade = gameState.upgrades[key];\n    const costMultiplier = Math.pow(1.15, upgrade.owned);\n    const actualCost = upgrade.cost * costMultiplier;\n    \n    if (gameState.coins >= actualCost) {\n        gameState.coins -= actualCost;\n        upgrade.owned++;\n        \n        document.getElementById('coins').textContent = formatNumber(gameState.coins);\n        saveGameState();\n        enterShop();\n    }\n}\n\nfunction formatSpawnerName(key) {\n    const names = {\n        basic: 'Basic Spawner',\n        advanced: 'Advanced Spawner',\n        premium: 'Premium Spawner',\n        legendary: 'Legendary Spawner'\n    };\n    return names[key] || key;\n}\n\nfunction buySpawner(key) {\n    const spawner = gameState.spawners[key];\n    const costMultiplier = Math.pow(1.2, spawner.owned);\n    const actualCost = spawner.cost * costMultiplier;\n    \n    if (gameState.coins >= actualCost) {\n        gameState.coins -= actualCost;\n        spawner.owned++;\n        \n        document.getElementById('coins').textContent = formatNumber(gameState.coins);\n        saveGameState();\n        enterIncrementalMenu();\n    }\n}\n\nfunction openRebirth() {\n    if (gameState.coins < 50000) return;\n    \n    const rebirthGain = Math.floor(Math.sqrt(gameState.coins / 1000));\n    document.getElementById('rebirth-gain').textContent = rebirthGain;\n    document.getElementById('rebirth-modal').classList.add('active');\n}\n\nfunction confirmRebirth() {\n    const rebirthGain = Math.floor(Math.sqrt(gameState.coins / 1000));\n    \n    gameState.clicks = 0;\n    gameState.coins = 0;\n    gameState.collected = 0;\n    gameState.clickMultiplier = 1;\n    gameState.clickPower = 1;\n    gameState.upgrades = {\n        doubleClick: { owned: 0, cost: 50 },\n        tripleClick: { owned: 0, cost: 200 },\n        autoClicker: { owned: 0, cost: 500 },\n        critStrike: { owned: 0, cost: 1000 }\n    };\n    gameState.spawners = {\n        basic: { owned: 0, cost: 100, income: 1 },\n        advanced: { owned: 0, cost: 500, income: 10 },\n        premium: { owned: 0, cost: 2000, income: 50 },\n        legendary: { owned: 0, cost: 10000, income: 500 }\n    };\n    \n    gameState.rebirthLevel++;\n    gameState.rebirthPoints += rebirthGain;\n    gameState.coins = 1000;\n    \n    closeRebirth();\n    leaveShop();\n    updateUI();\n    saveGameState();\n}\n\nfunction closeRebirth() {\n    document.getElementById('rebirth-modal').classList.remove('active');\n}\n\n// Keyboard shortcuts\ndocument.addEventListener('keydown', (e) => {\n    if (e.key === 'Escape') {\n        if (gameState.currentLocation === GAME_STATES.SHOP) {\n            leaveShop();\n        } else if (gameState.currentLocation === GAME_STATES.INCREMENTAL) {\n            leaveIncremental();\n        }\n        document.getElementById('rebirth-modal').classList.remove('active');\n    }\n});\n\n// Save/Load\nfunction saveGameState() {\n    localStorage.setItem('gameState', JSON.stringify(gameState));\n}\n\nfunction loadGameState() {\n    const saved = localStorage.getItem('gameState');\n    if (saved) {\n        const loaded = JSON.parse(saved);\n        Object.assign(gameState, loaded);\n    }\n}\n\n// Start game\nwindow.addEventListener('load', init);\n
